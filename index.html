@@ -433,7 +433,7 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
         // ==========================================
-        // 1. Supabase 初始化 (使用老師提供的 URL & Key)
+        // 1. Supabase 初始化
         // ==========================================
         const SUPABASE_URL = 'https://djnlztioaoxumvuqxqkb.supabase.co';
         const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_v-dzOhY1JfbObwxIGLsGBA_LTlDEDgd';
@@ -441,7 +441,7 @@
         const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
 
         // ==========================================
-        // 2. 生物學科題目庫 (循環系統 20題以上)
+        // 2. 生物學科題目庫 (循環系統)
         // ==========================================
         const QUESTION_BANK = [
             { q: "心臟分為幾個腔室？", opts: ["2個", "3個", "4個", "5個"], a: 2 },
@@ -471,11 +471,20 @@
         const ANIMALS = ['🐱','🐶','🐰','🐻','🦊','🐼','🐧','🐸'];
 
         // ==========================================
-        // 3. 遊戲狀態變數
+        // 3. 遊戲狀態變數與 UUID 相容性處理
         // ==========================================
         let clientToken = localStorage.getItem('sequence_battle_client_token');
         if (!clientToken) {
-            clientToken = crypto.randomUUID();
+            // 修正：支援本地端 (file://) 測試時沒有 crypto.randomUUID() 的狀況
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                clientToken = crypto.randomUUID();
+            } else {
+                clientToken = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = Math.random() * 16 | 0;
+                    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
             localStorage.setItem('sequence_battle_client_token', clientToken);
         }
 
@@ -562,7 +571,7 @@
         }
 
         async function fetchLiveRooms() {
-            if (currentRoomId) return; // 如果已經在房間內就不更新大廳
+            if (currentRoomId) return; 
             try {
                 const { data, error } = await supabase.rpc('list_live_rooms');
                 if (error) throw error;
@@ -640,11 +649,9 @@
             backToLobby();
         }
 
-        // 當房主直接關閉頁面時，嘗試送出 cancel_room
         window.addEventListener('pagehide', () => {
             if (currentRoomId && currentSeat === 1) {
                 const body = JSON.stringify({ p_room_id: currentRoomId, p_client_token: clientToken });
-                // 使用 REST API 直接呼叫 RPC 以便在 pagehide 運作
                 fetch(`${SUPABASE_URL}/rest/v1/rpc/cancel_room`, {
                     method: 'POST',
                     headers: {
@@ -659,14 +666,13 @@
         });
 
         // ==========================================
-        // 8. 加入房間 (Join Probe 手機機制)
+        // 8. 加入房間
         // ==========================================
         async function tryJoinRoom(roomId) {
             showToast('連線中...');
-            const probeId = crypto.randomUUID();
+            const probeId = 'probe_' + Math.random().toString(36).substr(2, 9);
             let hostAcked = false;
             
-            // 暫時建立頻道發送 probe
             const probeChannel = supabase.channel(`game-${roomId}`);
             
             probeChannel.on('broadcast', { event: 'host_ack' }, (payload) => {
@@ -723,7 +729,7 @@
         }
 
         // ==========================================
-        // 9. Realtime & Presence & Game State
+        // 9. Realtime & Presence
         // ==========================================
         function setupGameChannelAndPresence() {
             if (gameChannel) supabase.removeChannel(gameChannel);
@@ -732,7 +738,6 @@
                 config: { presence: { key: clientToken } }
             });
 
-            // 處理廣播 (房主回應 probe)
             gameChannel.on('broadcast', { event: 'join_probe' }, (payload) => {
                 if (currentSeat === 1) {
                     gameChannel.send({
@@ -743,7 +748,6 @@
                 }
             });
 
-            // 監聽 Presence 斷線
             gameChannel.on('presence', 'sync', () => {
                 const state = gameChannel.presenceState();
                 const oppSeat = currentSeat === 1 ? 2 : 1;
@@ -763,7 +767,6 @@
                     }
                     document.getElementById('disconnect-overlay').classList.remove('active');
                 } else if (opponentWasPresent && latestGameState?.status === 'playing') {
-                    // 對手消失且遊戲在進行中
                     if (!disconnectTimer) {
                         disconnectTimer = setTimeout(() => {
                             document.getElementById('disconnect-overlay').classList.add('active');
@@ -772,7 +775,6 @@
                 }
             });
 
-            // 監聽 game_state
             gameChannel.on('postgres_changes', { 
                 event: '*', 
                 schema: 'public', 
@@ -792,7 +794,6 @@
                 }
             });
             
-            // 手動拉取初始 game_state
             fetchGameState();
         }
 
@@ -805,13 +806,12 @@
         }
 
         // ==========================================
-        // 10. 戰鬥畫面與邏輯
+        // 10. 戰鬥邏輯
         // ==========================================
         function updateBattleUI() {
             if (!latestGameState) return;
 
             if (latestGameState.status === 'playing' && document.getElementById('battle-screen').className.indexOf('active') === -1) {
-                // 從 waiting 轉為 playing
                 if (heartbeatTimer) clearInterval(heartbeatTimer);
                 showScreen('battle-screen');
                 initBattle();
@@ -838,7 +838,6 @@
                     name: latestGameState.player1_name
                 };
 
-                // 更新 HP 數字與 Bar
                 document.getElementById('me-hp-text').innerText = me.hp;
                 document.getElementById('me-score').innerText = me.score;
                 document.getElementById('me-name').innerText = me.name;
@@ -853,25 +852,21 @@
                 oppBar.style.width = Math.max(0, (opp.hp / 7) * 100) + '%';
                 oppBar.style.backgroundColor = opp.hp > 3 ? 'var(--hp-green)' : 'var(--hp-red)';
 
-                // 處理事件動畫
                 if (latestGameState.last_event_id && latestGameState.last_event_id !== lastProcessedEventId) {
                     lastProcessedEventId = latestGameState.last_event_id;
                     const eventSeat = latestGameState.last_event_seat;
                     const type = latestGameState.last_event_type;
                     
                     if (eventSeat === currentSeat) {
-                        // 我方動作
                         if (type === 'hit') showActionAnimation('答對！', 'var(--hp-green)', 'me-animal', 'anim-attack');
                         else showActionAnimation('答錯扣血', 'var(--hp-red)', 'me-animal', 'anim-shake');
                     } else {
-                        // 對方動作
                         if (type === 'hit') showActionAnimation('對手攻擊！', 'var(--hp-red)', 'opp-animal', 'anim-attack-right');
                         else showActionAnimation('對手失誤', 'gray', 'opp-animal', 'anim-shake');
                     }
                 }
             }
 
-            // 遊戲結束
             if (latestGameState.status === 'finished') {
                 showResult();
             }
@@ -885,11 +880,9 @@
         }
 
         function generateQuestion() {
-            // 隨機挑選一題
             const qIdx = Math.floor(Math.random() * QUESTION_BANK.length);
             const qData = QUESTION_BANK[qIdx];
             
-            // 重新排列選項
             const indices = [0,1,2,3].sort(() => Math.random() - 0.5);
             
             currentQuestionObj = {
@@ -914,13 +907,11 @@
 
             const isCorrect = (btnIndex === currentQuestionObj.correctIndex);
             
-            // UI 回饋
             const btn = document.getElementById(`ans-${btnIndex}`);
             btn.style.backgroundColor = isCorrect ? 'var(--hp-green)' : 'var(--hp-red)';
             btn.style.color = "var(--white)";
             
             if (!isCorrect) {
-                // 標示正確答案
                 document.getElementById(`ans-${currentQuestionObj.correctIndex}`).style.backgroundColor = "var(--hp-green)";
                 document.getElementById(`ans-${currentQuestionObj.correctIndex}`).style.color = "var(--white)";
             }
@@ -932,7 +923,6 @@
                     p_is_correct: isCorrect
                 });
                 
-                // 停頓 1.5 秒換題
                 setTimeout(() => {
                     if (latestGameState?.status === 'playing') {
                         generateQuestion();
@@ -945,68 +935,76 @@
             }
         }
 
-        function showActionAnimation(text, color, targetId, animClass) {
-            // 文字特效
+        function showActionAnimation(text, color, elementId, animClass) {
             const overlay = document.getElementById('action-overlay');
             overlay.innerText = text;
             overlay.style.color = color;
             overlay.style.opacity = 1;
-            overlay.style.transform = "translate(-50%, -50%) scale(1.2)";
+            overlay.style.transform = 'translate(-50%, -60%) scale(1.2)';
+            
+            const el = document.getElementById(elementId);
+            el.classList.add(animClass);
             
             setTimeout(() => {
                 overlay.style.opacity = 0;
-                overlay.style.transform = "translate(-50%, -50%) scale(1)";
+                overlay.style.transform = 'translate(-50%, -50%) scale(1)';
+                el.classList.remove(animClass);
             }, 800);
-
-            // 動物動畫
-            const target = document.getElementById(targetId);
-            if (target) {
-                target.classList.add(animClass);
-                setTimeout(() => target.classList.remove(animClass), 500);
-            }
         }
 
         // ==========================================
-        // 11. 結算與清理
+        // 11. 結算畫面
         // ==========================================
         function showResult() {
-            const isWinner = latestGameState.winner_seat === currentSeat;
-            const emojiEl = document.getElementById('result-emoji');
-            const titleEl = document.getElementById('result-title');
-            const descEl = document.getElementById('result-desc');
+            if (heartbeatTimer) clearInterval(heartbeatTimer);
+            if (disconnectTimer) clearTimeout(disconnectTimer);
+            
+            let meScore = currentSeat === 1 ? latestGameState.player1_score : latestGameState.player2_score;
+            let oppScore = currentSeat === 1 ? latestGameState.player2_score : latestGameState.player1_score;
+            let meHp = currentSeat === 1 ? latestGameState.player1_hp : latestGameState.player2_hp;
+            
+            const scr = document.getElementById('result-screen');
+            const title = document.getElementById('result-title');
+            const emoji = document.getElementById('result-emoji');
+            const desc = document.getElementById('result-desc');
 
-            if (isWinner) {
-                emojiEl.innerText = "🏆";
-                titleEl.innerText = "勝利！";
-                titleEl.style.color = "#f1c40f";
-                descEl.innerText = "太棒了，你完全掌握了循環系統的奧秘！";
+            if (meHp > 0 && oppScore <= meScore) {
+                emoji.innerText = "🏆";
+                title.innerText = "勝利！";
+                title.style.color = "#f1c40f";
+                desc.innerText = `太強了！你以 ${meScore} 分擊敗了對手！`;
             } else {
-                emojiEl.innerText = "💔";
-                titleEl.innerText = "落敗";
-                titleEl.style.color = "var(--hp-red)";
-                descEl.innerText = "差一點點，再接再厲！";
+                emoji.innerText = "💀";
+                title.innerText = "失敗...";
+                title.style.color = "#e74c3c";
+                desc.innerText = `再接再厲！你獲得了 ${meScore} 分。`;
             }
-            document.getElementById('result-screen').classList.add('active');
+
+            scr.classList.add('active');
         }
 
         function backToLobby() {
-            // 清理機制
             if (heartbeatTimer) clearInterval(heartbeatTimer);
             if (disconnectTimer) clearTimeout(disconnectTimer);
-            if (gameChannel) supabase.removeChannel(gameChannel);
             
             currentRoomId = null;
             currentSeat = null;
-            latestGameState = null;
             opponentWasPresent = false;
+            latestGameState = null;
+            lastProcessedEventId = null;
             
-            // 恢復 UI
+            if (gameChannel) {
+                supabase.removeChannel(gameChannel);
+                gameChannel = null;
+            }
+            
             document.getElementById('result-screen').classList.remove('active');
             document.getElementById('disconnect-overlay').classList.remove('active');
             
             showScreen('lobby-screen');
-            initLobby();
+            fetchLiveRooms();
         }
+
     </script>
 </body>
 </html>
