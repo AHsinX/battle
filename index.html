@@ -111,6 +111,13 @@
         }
 
         /* Lobby */
+        .lobby-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
         #room-list {
             width: 100%;
             max-width: 500px;
@@ -339,7 +346,18 @@
 
         .big-emoji { font-size: 6rem; margin-bottom: 20px; }
         .result-title { font-size: 3rem; margin-bottom: 20px; color: #f1c40f; }
+        
+        /* QR Code Container */
+        #qrcode-container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
     </style>
+    <!-- 引入 QRCode.js 套件 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -365,7 +383,12 @@
     <div id="lobby-screen" class="screen">
         <h1>遊戲大廳</h1>
         <p class="status-text" id="lobby-greeting"></p>
-        <button class="btn" onclick="createRoom()">➕ 建立房間</button>
+        
+        <div class="lobby-buttons">
+            <button class="btn" onclick="createRoom()">➕ 建立房間</button>
+            <button class="btn btn-secondary" onclick="showQRCode()">📱 顯示 QR Code</button>
+        </div>
+
         <div id="room-list">
             <!-- 房間列表由 JS 產生 -->
         </div>
@@ -430,6 +453,15 @@
         <button class="btn" onclick="backToLobby()">回到遊戲大廳</button>
     </div>
 
+    <!-- QR Code 顯示區塊 -->
+    <div id="qr-overlay" class="overlay-screen">
+        <div class="result-title" style="color:#f1c40f; margin-bottom: 0;">邀請玩家加入</div>
+        <p style="font-size:1.2rem; color:#ccc;">請掃描下方 QR Code 進入遊戲</p>
+        <div id="qrcode-container"></div>
+        <p id="qr-url-text" style="font-size:1rem; word-break: break-all; max-width: 80%; text-align: center; color: #888;"></p>
+        <button class="btn" onclick="hideQRCode()">關閉</button>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
         // ==========================================
@@ -475,7 +507,6 @@
         // ==========================================
         let clientToken = localStorage.getItem('sequence_battle_client_token');
         if (!clientToken) {
-            // 修正：支援本地端 (file://) 測試時沒有 crypto.randomUUID() 的狀況
             if (typeof crypto !== 'undefined' && crypto.randomUUID) {
                 clientToken = crypto.randomUUID();
             } else {
@@ -527,11 +558,44 @@
         }
 
         // ==========================================
+        // 4.5 顯示與隱藏 QR Code 功能
+        // ==========================================
+        function showQRCode() {
+            // 取得當前的網址 (去掉 # 或 ? 之後的參數)
+            let currentUrl = window.location.href.split('#')[0].split('?')[0];
+            
+            if (currentUrl.startsWith('file://')) {
+                alert('⚠️ 警告：您目前在本地端 (file://) 開啟網頁。產生的 QR Code 無法讓其他裝置連線，請將網頁上傳至 GitHub Pages 等網路空間，或使用區域網路 IP 連線測試。');
+            }
+
+            document.getElementById('qr-overlay').classList.add('active');
+            const container = document.getElementById('qrcode-container');
+            
+            // 清空先前的 QR Code
+            container.innerHTML = '';
+            
+            // 產生新的 QR Code
+            new QRCode(container, {
+                text: currentUrl,
+                width: 200,
+                height: 200,
+                colorDark : "#000000",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+
+            document.getElementById('qr-url-text').innerText = currentUrl;
+        }
+
+        function hideQRCode() {
+            document.getElementById('qr-overlay').classList.remove('active');
+        }
+
+        // ==========================================
         // 5. 首頁與連線檢查
         // ==========================================
         window.onload = async () => {
             try {
-                // 測試資料庫連線
                 const { error } = await supabase.from('rooms').select('id').limit(1);
                 if (error) throw error;
                 document.getElementById('db-status').innerText = "✅ 資料庫已連接";
